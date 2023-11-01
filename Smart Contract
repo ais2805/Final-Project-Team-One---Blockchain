@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.13;
+
+contract EnvironmentallyFriendlyContainer is ERC721, Ownable {
+    IERC20 public usdtToken;
+    uint256 public contributionRate = 10; // Kontribusi terhadap lingkungan: 10%
+    uint256 public serviceFeeRate = 10; // Potongan layanan: 10%
+    uint256 public minRentalPrice = 500000; // Harga sewa minimum: 500,000 USDT
+    uint256 public maxRentalPrice = 1000000; // Harga sewa maksimum: 1,000,000 USDT
+
+    // Struct untuk menyimpan informasi kontainer
+    struct ContainerInfo {
+        uint256 rentalPrice;
+        uint256 contribution;
+        uint256 serviceFee;
+        uint256 timestamp;
+    }
+
+    // Mapping untuk menyimpan informasi kontainer
+    mapping(uint256 => ContainerInfo) public containerInfo;
+
+    event ContainerMinted(address indexed owner, uint256 tokenId, uint256 rentalPrice);
+    event ContainerRented(address indexed renter, uint256 tokenId);
+    event NFTTransferred(address indexed from, address indexed to, uint256 tokenId);
+    event ContributionReceived(address indexed contributor, uint256 amount);
+    event ServiceFeeReceived(address indexed receiver, uint256 amount);
+
+    constructor(address _usdtToken) ERC721("EnvironmentallyFriendlyContainer", "EFC") {
+        usdtToken = IERC20(_usdtToken);
+    }
+
+    function mintContainer(address owner, uint256 tokenId, uint256 rentalPrice) external onlyOwner {
+        require(rentalPrice >= minRentalPrice && rentalPrice <= maxRentalPrice, "Rental price out of range");
+        _mint(owner, tokenId);
+        containerInfo[tokenId] = ContainerInfo(rentalPrice, 0, 0, block.timestamp);
+        emit ContainerMinted(owner, tokenId, rentalPrice);
+    }
+
+    function rentContainer(uint256 tokenId) external {
+        require(ownerOf(tokenId) != address(0), "Container does not exist");
+        require(ownerOf(tokenId) != msg.sender, "Cannot rent your own container");
+        ContainerInfo storage info = containerInfo[tokenId];
+        require(info.rentalPrice > 0, "Container not available for rent");
+        uint256 contributionAmount = (info.rentalPrice * contributionRate) / 100;
+        uint256 serviceFeeAmount = (info.rentalPrice * serviceFeeRate) / 100;
+        uint256 totalAmount = info.rentalPrice;
+
+        // Transfer contribution dan service fee
+        usdtToken.transferFrom(msg.sender, owner(), contributionAmount);
+        usdtToken.transferFrom(msg.sender, address(this), serviceFeeAmount);
+
+        info.contribution = contributionAmount;
+        info.serviceFee = serviceFeeAmount;
+
+        // Transfer USDT ke pemilik kontainer
+        usdtToken.transfer(ownerOf(tokenId), info.rentalPrice - contributionAmount - serviceFeeAmount);
+
+        emit ContainerRented(msg.sender, tokenId);
+    }
+
+    function transferNFT(address to, uint256 tokenId) external {
+        require(ownerOf(tokenId) == msg.sender, "You don't own this NFT");
+        _transfer(msg.sender, to, tokenId);
+        emit NFTTransferred(msg.sender, to, tokenId);
+    }
+
+    function mintNFT(address to, uint256 tokenId) external onlyOwner {
+        _mint(to, tokenId);
+    }
+
+    function burnNFT(uint256 tokenId) external onlyOwner {
+        _burn(tokenId);
+    }
+
+    function inputWasteData(uint256 tokenId, uint256 contributionAmount) external onlyOwner {
+        ContainerInfo storage info = containerInfo[tokenId];
+        info.contribution += contributionAmount;
+        emit ContributionReceived(msg.sender, contributionAmount);
+    }
+
+    function sendUSDT(address to, uint256 amount) external onlyOwner {
+        usdtToken.transfer(to, amount);
+        emit ServiceFeeReceived(to, amount);
+    }
+}
